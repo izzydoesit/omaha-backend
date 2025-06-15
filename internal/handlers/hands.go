@@ -27,7 +27,7 @@ type HandsHandler struct {
 // @Failure 500 {object} ErrorResponse
 // @Router /api/hands [post]
 func (h *HandsHandler) CreateHand(c *fiber.Ctx) error {
-	var req struct {
+	var req []struct {
 		UserID string `json:"user_id"`
 		Cards []string `json:"cards"`
 	}
@@ -35,20 +35,27 @@ func (h *HandsHandler) CreateHand(c *fiber.Ctx) error {
 	if err := c.BodyParser(&req); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid request"})
 	}
-	if len(req.Cards) != 4 {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Omaha hand must have exactly 4 cards"})
+
+	var created []models.Hand
+	for _, handReq := range req {
+		if len(handReq.Cards) != 4 {
+			continue // skip invalid hands
+		}
+		hand := models.Hand{
+			UserID: handReq.UserID,
+			Cards: strings.Join(handReq.Cards, ","),  // e.g. "As,Kd,7c,3h"
+			CreatedAt: time.Now(),
+		}
+		if err := services.SaveHand(h.DB, &hand); err == nil {
+			created = append(created, hand)
+		}
 	}
 
-	hand := models.Hand{
-		UserID: req.UserID,
-		Cards: strings.Join(req.Cards, ","),  // e.g. "As,Kd,7c,3h"
-		CreatedAt: time.Now(),
+	if len(created) == 0 {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "No valid hands were processed"})
 	}
 
-	if err := services.SaveHand(h.DB, &hand); err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to save hand"})
-	}
-	return c.Status(fiber.StatusCreated).JSON(hand)
+	return c.Status(fiber.StatusCreated).JSON(created)
 }
 
 // ListHands handles GET /api/hands?user_id=... List hands for a user
